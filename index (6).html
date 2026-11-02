@@ -1,0 +1,319 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Skyline — Weather Website</title>
+<meta name="description" content="Skyline: a complete weather dashboard with live conditions, forecasts, air quality and maps." />
+
+<!-- Fonts -->
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet">
+
+<!-- Leaflet (map) -->
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+
+<!-- Chart.js (graphs) -->
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.4/dist/chart.umd.min.js" defer></script>
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" defer></script>
+<script src="https://cdn.jsdelivr.net/npm/html2canvas@1.4.1/dist/html2canvas.min.js" defer></script>
+
+<link rel="stylesheet" href="style.css" />
+
+<!-- PWA -->
+<link rel="manifest" href="manifest.json" />
+<meta name="theme-color" content="#0B1026" />
+<link rel="apple-touch-icon" href="icon-192.png" />
+<meta name="apple-mobile-web-app-capable" content="yes" />
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+</head>
+<body data-theme="dark" data-unit="c" data-lang="en" class="page-enter">
+
+<!-- ================= SKY BACKGROUND (signature element) ================= -->
+<canvas id="sky-canvas"></canvas>
+<div id="sky-gradient"></div>
+
+<!-- ================= OFFLINE BANNER ================= -->
+<div id="offline-banner" class="offline-banner hidden" role="alert">
+  <span data-i18n="offline">You're offline — showing the last saved forecast.</span>
+</div>
+
+<!-- ================= 1. HEADER ================= -->
+<header class="site-header">
+  <div class="header-inner">
+    <div class="brand">
+      <svg class="logo" width="30" height="30" viewBox="0 0 40 40" fill="none" xmlns="http://www.w3.org/2000/svg">
+        <circle cx="16" cy="16" r="10" fill="#FFB454"/>
+        <path d="M10 27h20a7 7 0 0 0 0-14 9 9 0 0 0-17.3-2.6A8 8 0 0 0 10 27Z" fill="#F2F0E9" fill-opacity="0.92"/>
+      </svg>
+      <span class="brand-name">Skyline</span>
+    </div>
+
+    <form id="search-form" class="search-bar" role="search" autocomplete="off">
+      <input type="text" id="search-input" placeholder="Search city or country…" data-i18n-placeholder="searchPlaceholder" aria-label="Search city" />
+      <div id="autocomplete-list" class="autocomplete-list hidden"></div>
+      <button type="submit" class="btn-icon" id="search-btn" aria-label="Search" title="Search">
+        <svg viewBox="0 0 24 24" width="18" height="18"><path fill="currentColor" d="M21 20.3 16.6 16a7.5 7.5 0 1 0-1.4 1.4l4.4 4.4 1.4-1.5ZM4.5 10.5a6 6 0 1 1 12 0 6 6 0 0 1-12 0Z"/></svg>
+      </button>
+      <button type="button" class="btn-icon" id="locate-btn" aria-label="Use current location" title="Use current location">📍</button>
+    </form>
+
+    <div class="header-actions">
+      <button type="button" class="btn-icon" id="sound-toggle" aria-label="Toggle ambient weather sound" title="Ambient weather sound">🔇</button>
+      <button type="button" class="btn-icon" id="theme-toggle" aria-label="Toggle dark/light mode" title="Toggle theme">🌙</button>
+    </div>
+  </div>
+
+  <!-- ================= 2. SEARCH SECTION EXTRAS ================= -->
+  <div class="search-extras" id="search-extras">
+    <div class="chip-row" id="recent-searches">
+      <span class="chip-label" data-i18n="recent">Recent:</span>
+    </div>
+    <div class="chip-row" id="popular-cities">
+      <span class="chip-label" data-i18n="popular">Popular:</span>
+    </div>
+  </div>
+</header>
+
+<main id="app">
+
+  <!-- ================= LOADING / ERROR ================= -->
+  <div id="loading" class="hidden">
+    <div class="skeleton-hero glass shimmer"></div>
+    <div class="skeleton-row">
+      <div class="skeleton-card shimmer"></div>
+      <div class="skeleton-card shimmer"></div>
+      <div class="skeleton-card shimmer"></div>
+      <div class="skeleton-card shimmer"></div>
+    </div>
+    <div class="state-box">
+      <div class="spinner"></div>
+      <p data-i18n="loading">Fetching the sky…</p>
+    </div>
+  </div>
+
+  <div id="error-box" class="state-box hidden">
+    <p id="error-message" data-i18n="cityNotFound">City not found. Check the spelling and try again.</p>
+    <button id="retry-btn" class="btn-primary" data-i18n="retry">Retry</button>
+  </div>
+
+  <div id="weather-content" class="hidden">
+
+    <!-- ================= 3. CURRENT WEATHER ================= -->
+    <section class="hero glass" id="current-weather">
+      <div class="hero-top">
+        <div class="hero-location">
+          <h1 id="city-name">—</h1>
+          <p id="country-name" class="muted">—</p>
+          <p class="muted small"><span id="current-date">—</span> · <span id="current-time">—</span></p>
+        </div>
+        <div class="hero-actions">
+          <button id="favorite-btn" class="btn-icon" title="Add to favorites" aria-label="Add to favorites">♡</button>
+          <button id="share-btn" class="btn-icon" title="Share weather" aria-label="Share weather">⇪</button>
+          <button id="copy-btn" class="btn-icon" title="Copy report" aria-label="Copy weather report">⧉</button>
+          <button id="voice-btn" class="btn-icon" title="Voice weather report" aria-label="Play voice weather report">🔊</button>
+          <button id="screenshot-btn" class="btn-icon" title="Screenshot" aria-label="Take screenshot">📷</button>
+          <button id="refresh-btn" class="btn-icon" title="Refresh" aria-label="Refresh">⟳</button>
+        </div>
+      </div>
+
+      <div class="hero-main">
+        <div class="hero-icon" id="weather-icon" aria-hidden="true"></div>
+        <div class="hero-temp">
+          <span id="current-temp">--</span><span class="deg">°<span id="unit-label">C</span></span>
+        </div>
+        <div class="hero-desc">
+          <p id="weather-desc" class="desc-text">—</p>
+          <p class="muted">Feels like <span id="feels-like">--</span>°</p>
+          <p class="muted"><span id="temp-max">--</span>° / <span id="temp-min">--</span>° <span data-i18n="maxmin">max/min</span></p>
+        </div>
+      </div>
+    </section>
+
+    <!-- ================= 4. WEATHER DETAILS ================= -->
+    <section class="panel">
+      <h2 data-i18n="details">Weather Details</h2>
+      <div class="grid details-grid" id="details-grid">
+        <div class="stat-card glass"><span class="stat-label">Humidity</span><span class="stat-value" id="stat-humidity">--%</span></div>
+        <div class="stat-card glass"><span class="stat-label">Wind Speed</span><span class="stat-value" id="stat-wind">-- km/h</span></div>
+        <div class="stat-card glass"><span class="stat-label">Wind Direction</span><span class="stat-value" id="stat-wind-dir">--</span></div>
+        <div class="stat-card glass"><span class="stat-label">Pressure</span><span class="stat-value" id="stat-pressure">-- hPa</span></div>
+        <div class="stat-card glass"><span class="stat-label">Visibility</span><span class="stat-value" id="stat-visibility">-- km</span></div>
+        <div class="stat-card glass"><span class="stat-label">UV Index</span><span class="stat-value" id="stat-uv">--</span></div>
+        <div class="stat-card glass"><span class="stat-label">Dew Point</span><span class="stat-value" id="stat-dewpoint">--°</span></div>
+        <div class="stat-card glass"><span class="stat-label">Cloud Cover</span><span class="stat-value" id="stat-cloud">--%</span></div>
+      </div>
+    </section>
+
+    <div class="two-col">
+      <!-- ================= 5. SUN INFO ================= -->
+      <section class="panel">
+        <h2 data-i18n="sun">Sun</h2>
+        <div class="sun-arc glass">
+          <svg viewBox="0 0 200 100" class="arc-svg"><path d="M10 90 A 90 90 0 0 1 190 90" stroke="currentColor" stroke-opacity="0.25" stroke-width="2" fill="none"/><circle id="sun-pos" cx="10" cy="90" r="6" fill="#FFB454"/></svg>
+          <div class="sun-row"><span>🌅 Sunrise</span><strong id="sunrise">--:--</strong></div>
+          <div class="sun-row"><span>🌇 Sunset</span><strong id="sunset">--:--</strong></div>
+          <div class="sun-row"><span>⏱️ Day Length</span><strong id="day-length">--h --m</strong></div>
+          <div class="sun-row"><span>✨ Golden Hour</span><strong id="golden-hour">--:--</strong></div>
+        </div>
+      </section>
+
+      <!-- ================= 6. MOON INFO ================= -->
+      <section class="panel">
+        <h2 data-i18n="moon">Moon</h2>
+        <div class="moon-box glass">
+          <div class="moon-icon" id="moon-icon">🌕</div>
+          <div class="sun-row"><span data-i18n="moonPhase">Phase</span><strong id="moon-phase">--</strong></div>
+          <div class="sun-row"><span data-i18n="illumination">Illumination</span><strong id="moon-illum">--%</strong></div>
+          <p class="muted tiny" data-i18n="moonNote">Moonrise/moonset times need a premium ephemeris API — not included in the free data source used here.</p>
+        </div>
+      </section>
+    </div>
+
+    <!-- ================= 7. HOURLY FORECAST ================= -->
+    <section class="panel">
+      <h2 data-i18n="hourly">Next 24 Hours</h2>
+      <div class="hourly-scroll" id="hourly-scroll"></div>
+    </section>
+
+    <!-- ================= 8. 7-DAY FORECAST ================= -->
+    <section class="panel">
+      <h2 data-i18n="daily">7-Day Forecast</h2>
+      <div class="daily-list" id="daily-list"></div>
+    </section>
+
+    <!-- ================= 9. AIR QUALITY ================= -->
+    <section class="panel">
+      <h2 data-i18n="airQuality">Air Quality</h2>
+      <div class="aqi-box glass">
+        <div class="aqi-main">
+          <span class="aqi-number" id="aqi-value">--</span>
+          <span class="aqi-status" id="aqi-status">--</span>
+        </div>
+        <div class="grid aqi-grid">
+          <div class="stat-card"><span class="stat-label">PM2.5</span><span class="stat-value" id="aqi-pm25">--</span></div>
+          <div class="stat-card"><span class="stat-label">PM10</span><span class="stat-value" id="aqi-pm10">--</span></div>
+          <div class="stat-card"><span class="stat-label">CO</span><span class="stat-value" id="aqi-co">--</span></div>
+          <div class="stat-card"><span class="stat-label">NO₂</span><span class="stat-value" id="aqi-no2">--</span></div>
+          <div class="stat-card"><span class="stat-label">SO₂</span><span class="stat-value" id="aqi-so2">--</span></div>
+          <div class="stat-card"><span class="stat-label">O₃</span><span class="stat-value" id="aqi-o3">--</span></div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ================= 10. RAIN INFO ================= -->
+    <section class="panel">
+      <h2 data-i18n="rain">Rain</h2>
+      <div class="grid rain-grid">
+        <div class="stat-card glass"><span class="stat-label">Rain Chance</span><span class="stat-value" id="rain-chance">--%</span></div>
+        <div class="stat-card glass"><span class="stat-label">Rain Volume</span><span class="stat-value" id="rain-volume">-- mm</span></div>
+        <div class="stat-card glass"><span class="stat-label">Snow</span><span class="stat-value" id="snow-volume">-- cm</span></div>
+      </div>
+    </section>
+
+    <!-- ================= 11. WEATHER MAP ================= -->
+    <section class="panel">
+      <h2 data-i18n="map">Weather Map</h2>
+      <p class="muted tiny" data-i18n="mapNote">Rain radar (RainViewer), satellite and terrain views work with no API key. Temperature/cloud/wind color layers need a free OpenWeatherMap key — add it at the top of script.js to switch those on.</p>
+      <div class="map-toolbar">
+        <div class="toggle-group" id="basemap-switch">
+          <button class="toggle-btn active" data-basemap="streets">Streets</button>
+          <button class="toggle-btn" data-basemap="satellite">Satellite</button>
+          <button class="toggle-btn" data-basemap="terrain">Terrain</button>
+        </div>
+        <div class="toggle-group" id="overlay-switch">
+          <button class="toggle-btn" data-overlay="radar">🌧️ Radar</button>
+          <button class="toggle-btn" data-overlay="temp">🌡️ Temp</button>
+          <button class="toggle-btn" data-overlay="cloud">☁️ Cloud</button>
+          <button class="toggle-btn" data-overlay="wind">💨 Wind</button>
+        </div>
+        <button class="btn-icon" id="map-fullscreen-btn" title="Fullscreen map" aria-label="Fullscreen map">⛶</button>
+      </div>
+      <div id="map-wrap">
+        <div id="weather-map"></div>
+        <div id="map-legend" class="map-legend hidden"></div>
+      </div>
+    </section>
+
+    <!-- ================= 12. CHARTS ================= -->
+    <section class="panel">
+      <h2 data-i18n="charts">Charts</h2>
+      <div class="charts-grid">
+        <div class="chart-card glass"><canvas id="chart-temp"></canvas></div>
+        <div class="chart-card glass"><canvas id="chart-humidity"></canvas></div>
+        <div class="chart-card glass"><canvas id="chart-wind"></canvas></div>
+        <div class="chart-card glass"><canvas id="chart-rain"></canvas></div>
+        <div class="chart-card glass"><canvas id="chart-pressure"></canvas></div>
+        <div class="chart-card glass"><canvas id="chart-uv"></canvas></div>
+        <div class="chart-card glass"><canvas id="chart-aqi"></canvas></div>
+        <div class="chart-card glass"><canvas id="chart-weekly"></canvas></div>
+      </div>
+      <p class="muted tiny" id="monthly-stats-note" style="margin-top:10px;"></p>
+    </section>
+
+    <!-- ================= 6b. AI SMART FEATURES ================= -->
+    <section class="panel">
+      <h2 data-i18n="aiInsights">Smart Weather Assistant</h2>
+      <p class="muted tiny" data-i18n="aiNote">Rule-based on-device suggestions from the live data above — not a hosted AI model, so it works without any API key.</p>
+      <div class="ai-grid" id="ai-grid">
+        <div class="ai-card glass"><span class="ai-icon">📝</span><div><span class="ai-label" data-i18n="aiSummary">Summary</span><p id="ai-summary" class="ai-text">—</p></div></div>
+        <div class="ai-card glass"><span class="ai-icon">👕</span><div><span class="ai-label" data-i18n="aiClothing">What to wear</span><p id="ai-clothing" class="ai-text">—</p></div></div>
+        <div class="ai-card glass"><span class="ai-icon">☂️</span><div><span class="ai-label" data-i18n="aiUmbrella">Umbrella</span><p id="ai-umbrella" class="ai-text">—</p></div></div>
+        <div class="ai-card glass"><span class="ai-icon">🏃</span><div><span class="ai-label" data-i18n="aiActivity">Outdoor activity</span><p id="ai-activity" class="ai-text">—</p></div></div>
+        <div class="ai-card glass"><span class="ai-icon">✈️</span><div><span class="ai-label" data-i18n="aiTravel">Travel</span><p id="ai-travel" class="ai-text">—</p></div></div>
+        <div class="ai-card glass"><span class="ai-icon">🌾</span><div><span class="ai-label" data-i18n="aiFarming">Farming note</span><p id="ai-farming" class="ai-text">—</p></div></div>
+      </div>
+      <div class="ai-alerts" id="ai-alerts"></div>
+      <div class="ai-actions">
+        <button class="btn-primary" id="ai-share-btn" data-i18n="aiShare">Share AI Report</button>
+      </div>
+    </section>
+
+    <!-- ================= 14. SETTINGS ================= -->
+    <section class="panel">
+      <h2 data-i18n="settings">Settings</h2>
+      <div class="settings-grid glass">
+        <div class="setting-row">
+          <span data-i18n="unit">Units</span>
+          <div class="toggle-group">
+            <button class="toggle-btn active" data-unit-btn="c">°C</button>
+            <button class="toggle-btn" data-unit-btn="f">°F</button>
+          </div>
+        </div>
+        <div class="setting-row">
+          <span data-i18n="language">Language</span>
+          <div class="toggle-group">
+            <button class="toggle-btn active" data-lang-btn="en">EN</button>
+            <button class="toggle-btn" data-lang-btn="bn">বাংলা</button>
+          </div>
+        </div>
+        <div class="setting-row">
+          <span data-i18n="autoLocate">Auto-detect location</span>
+          <label class="switch"><input type="checkbox" id="auto-locate-toggle" checked><span class="slider"></span></label>
+        </div>
+        <div class="setting-row">
+          <button class="btn-primary" id="settings-refresh-btn" data-i18n="refresh">Refresh Now</button>
+        </div>
+      </div>
+    </section>
+
+    <!-- ================= 15. FAVORITE CITIES ================= -->
+    <section class="panel">
+      <h2 data-i18n="favorites">Favorite Cities</h2>
+      <div class="chip-row" id="favorites-list">
+        <span class="muted tiny" id="favorites-empty" data-i18n="noFavorites">No favorites yet — tap ♡ on a city to save it.</span>
+      </div>
+    </section>
+
+  </div>
+</main>
+
+<footer class="site-footer">
+  <p class="muted tiny">Data: Open‑Meteo &amp; BigDataCloud (no API key required) · Built by Sreejon</p>
+</footer>
+
+<div id="toast" class="toast hidden"></div>
+
+<script src="script.js"></script>
+</body>
+</html>
